@@ -1,0 +1,26 @@
+---
+title: "Temporary"
+author: "Ryan C. Duggan"
+date: "August 9, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('tidyverse')
+library('knitr')
+library('kableExtra')
+model_1 <- read.csv(file = '../data/model.csv', stringsAsFactors = FALSE)
+```
+
+
+```{r}
+model_1 %>%
+  rename("95% CI" = X95..CI, "Balanced Accuracy" = Balanced.Accuracy) %>%
+  select(-X) %>%
+  kable(.) %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(c(1:3), color = "black")
+  
+```
+

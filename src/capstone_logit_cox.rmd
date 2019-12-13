@@ -1,0 +1,507 @@
+---
+title: "Capstone Logit/Survival Stuff"
+author: "Ryan C. Duggan"
+date: "July 2, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+#UNUSED
+
+
+#Convering DHR data from long format to wide using tidyr
+# Would need to then separate each day into columns 
+# taken from https://stackoverflow.com/questions/30592094/r-spreading-multiple-columns-with-tidyr
+# Don't need to use for initial analysis, but will be good to have
+
+#dhr %>%
+#  unite(., col = merged, DHAD:DHBPR) %>%
+#  spread(., key = DayNo, value = merged, sep = "_") %>%
+#  separate(DayNo_1, sep = "_", 
+#           into = c(colnames(dhr)[which(colnames(dhr)   == "DHAD") :  
+#                                    which(colnames(dhr) == "DHBPR")])) %>%
+#  head(30)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+
+final_df <- pt_hosp_ct %>%
+  left_join(dhr2, by = "PID") %>%
+  dplyr::select(-c(arrival_date, PDOB, arrival_time, #Dropping unused variables
+                   trauma_time, ct_date_time, PDOT, PSEATB, PHELMET, 
+                   arrival_time, arrival_date, ADMODE, ADTYPE, ATRANS, 
+                   AGCSEYES:AGCSMOT, ACGSEYES1:ACGSMOT1))
+
+dhr_bilat_chisq <- chisq.test(final_df$DHPBLAT, final_df$outcome, correct = F) #SIG
+dhr_asym_chisq <- chisq.test(final_df$DHPASYM, final_df$outcome, correct = F) #NS
+
+dhr_pupil_chisq <- chisq.test(final_df$pupil_dhr, final_df$outcome, 
+                              correct = F) #Sig!!
+   #chisq.test(final_df$DHMECHV, final_df$outcome, correct = F) #NS
+
+dhr_bp_wilcox <- wilcox.test(DHSBPL ~ outcome, data = final_df) #SIG
+   #wilcox.test(DHLRPAO ~ outcome, data = final_df) #NS
+
+dhr_ht_chisq <- chisq.test(final_df$dhr_hypotension, final_df$outcome, 
+                             correct = F) #sig
+dhr_hypox_chisq <- chisq.test(final_df$dhr_hypoxia, final_df$outcome, 
+                              correct = F, simulate.p.value = T) #NS
+
+#Possible to import other variables to compare procedures, not currently included:
+#fisher.test(as.factor(temp$DHCSFD), temp$outcome) # p = 0.059
+#chisq.test(as.factor(temp$DHANTI), temp$outcome, correct = F) #p = 0.023
+
+dhr_test_list <- list(dhr_bilat_chisq, dhr_asym_chisq, 
+                      dhr_pupil_chisq, dhr_bp_wilcox, dhr_ht_chisq, 
+                      dhr_hypox_chisq)
+
+dhr_teststats <- lapply(dhr_test_list, function(x)
+  {
+  if(!is.null(x$statistic)){
+    test_stat <- round(x$statistic, 3)
+  }
+  else {
+    test_stat <- " "
+  }
+  
+  c(test_stat, datascaffold::scaff_pvnot(x$p.value))
+  })
+
+summary_table4 <- list(
+  "DHR - Abnormal Pupils - n(%)" = 
+    list("Yes" = ~ n_perc0(.data$pupil_dhr == "0", na_rm = T),
+         "No" = ~ n_perc0(.data$pupil_dhr == "1", na_rm = T)),
+  "DHR - Pupils Fixed and Dilated - n(%)" = 
+    list("Yes" = ~ n_perc0(.data$DHPBLAT == "1", na_rm = T),
+         "No" = ~ n_perc0(.data$DHPBLAT == "2", na_rm = T)),
+  "DHR - Pupil Asymmetry > 1mm - n(%)" = 
+    list("Yes" = ~ n_perc0(.data$DHPASYM == "1", na_rm = T),
+         "No" = ~ n_perc0(.data$DHPASYM == "2", na_rm = T)),
+  "DHR - Hypotension - n(%)" =
+    list("Yes" = ~ n_perc0(.data$dhr_hypotension == "1", na_rm = T),
+         "No" = ~ n_perc0(.data$dhr_hypotension == "0", na_rm = T)),
+  "DHR - Hypoxia - n(%)" =
+    list("Yes" = ~ n_perc0(.data$dhr_hypoxia == "1", na_rm = T),
+         "No" = ~ n_perc0(.data$dhr_hypoxia == "0", na_rm = T))
+    )
+
+dhr_table <- cbind(summary_table(final_df, summary_table4),
+      summary_table(group_by(final_df, outcome), summary_table4))
+
+pcol_4 <- rep("", times = nrow(dhr_table))
+
+rep_rows <- c(1, 3, 5, 7, 9)
+pcol_4[rep_rows] <- as.character(sapply(seq(from = 1, length.out = 
+                                              length(rep_rows)), 
+                                        function(x)
+                                          {
+                                          dhr_teststats[[x]][2]
+                                          } )) 
+
+dhr_table <- cbind(dhr_table, pcol_4)
+colnames(dhr_table) <- cols
+
+```
+
+*Table 4.* DHR factors by patient outcome. (NO LONGER INCLUDING AS OF 6/27/19)
+```{r eval=FALSE, include=FALSE}
+print(dhr_table)
+```
+
+
+```{r}
+severe_injury_model <- final_df %>%
+  dplyr::select(PSEX, PRACE, PWEIGHT, inj_mech, ED_airway_any, EDSAO2, ALRSBP,
+                hypotension_ed, hypoxia_ed, pupil_ed, abnormal_CT,
+                age_at_arrival_yrs, time_to_arrival_hrs, trauma_to_ct_hrs, 
+                ASAO2, LRSBP, AFLUID, EDFLUID, APBILAT, APASYM, ACEI, APASYM1, 
+                prehosp_airway_any, pupil_prehosp, hypoxia_prehosp, 
+                hypotension_prehosp, DHPBLAT,DHPASYM, DHMECHV, DHSBPL, DHLRPAO, 
+                dhr_hypotension, dhr_hypoxia, pupil_dhr) %>%
+  lapply(., function(x){
+    model_temp <- glm(OCOND ~ x, data = final_dataset, family = "binomial")
+    return(summary(model_temp)$coefficients)
+  })
+
+pt_hosp_ct %>%
+lapply(., function(x){
+    model_temp <- glm(OCOND ~ x, data = pt_hosp_ct, family = "binomial")
+    return(summary(model_temp)$coefficients)
+  })
+
+
+#variables that don't work: DHCRAN, hypotension_prehosp, hypoxia_prehosp, EDFLUID, ASAO2
+#glm(OCOND ~ PSEX+ PWEIGHT + inj_mech + APBILAT + APASYM + AGCSTOT + LRSBP + AFLUID + APASYM + #ACGSMOT1 + ACGSTOT1 + ALRSBP + pupil_prehosp + EDSAO2 + EDPAA +  hypotension_ed + hypoxia_ed + #pupil_ed + DHBPR + CTBC + abnormal_CT + age_at_arrival_yrs + time_to_arrival_hrs + trauma_to_ct_hrs + #ed_airway_cat + prehosp_airway_cat + midline_shift_cats, data = pt_hosp_ct, family = "binomial") %>% #summary
+
+#multivariate logit
+
+#prehosp_model <- glm(OCOND ~ age_at_arrival_yrs + PSEX + inj_mech + 
+#                       pupil_prehosp +  hypoxia_prehosp + hypotension_prehosp + 
+#                       prehosp_airway_any + AFLUID + ASAO2 + LRSBP, 
+#                     data = final_df, family = "binomial")
+#
+#ed_model <- glm(OCOND ~ pupil_ed + hypoxia_ed + hypotension_ed + ED_airway_any + #EDFLUID + EDSAO2 + EDAAM, data = final_df, family = "binomial")
+#
+model_test <- glm(OCOND ~ trauma_to_ct_hrs + factor(abnormal_CT) + pupil_ed
+                  + hypoxia_ed + hypotension_ed + ED_airway_any + 
+                    age_at_arrival_yrs, 
+                  data = final_df, family = "binomial")
+
+
+# pairwise interaction test
+prehosp_subset <- final_df %>%
+  select(age_at_arrival_yrs, PSEX, PRACE, PWEIGHT, inj_mech, APBILAT, APASYM, ASAO2, LRSBP, AFLUID, 
+          APASYM1, hypotension_prehosp, 
+         hypoxia_prehosp,  
+         prehosp_airway_any, pupil_prehosp, 
+         time_to_arrival_hrs, OCOND)
+
+#prehosp_int <- sapply(prehosp_subset, simplify = F, function(x){
+#  sapply(prehosp_subset, simplify = F, function(y){
+#    model <- glm(OCOND ~ x*y, data = prehosp_subset, family = "binomial")
+#    if(any(summary(model)$coefficients[-1, 4] < 0.05))
+#      {
+#      return(model)
+#    }
+#  })
+#})
+
+ed_subset <- final_df3
+  select(PSEX, PRACE, PWEIGHT, inj_mech, 
+         EDPAA, APASYM1, EDSAO2, ALRSBP, EDFLUID,  
+         hypotension_ed,  hypoxia_ed,
+          ED_airway_any,  pupil_ed, 
+         abnormal_CT, time_to_arrival_hrs, trauma_to_ct_hrs, OCOND)
+
+pre_ed_int <- sapply(ed_subset, simplify = F, function(x){
+  sapply(ed_subset, simplify = F, function(y){
+    model <- glm(OCOND ~ x*y, data = ed_subset, family = "binomial")
+    if(any(summary(model)$coefficients[-1, 4] < 0.05))
+      {
+      return(model)
+    }
+  })
+})
+
+#DHLRPAO, dhr_hypoxia,EDFLUID, AFLUID - removed due to empty contingency table cells
+sub_temp <- final_df %>% select(PSEX, PRACE, PWEIGHT, inj_mech, APBILAT, APASYM, ASAO2, LRSBP, 
+         EDPAA, APASYM1, EDSAO2, ALRSBP, hypotension_prehosp, 
+         hypotension_ed, hypoxia_prehosp, hypoxia_ed, dhr_hypotension,
+         prehosp_airway_any, ED_airway_any, pupil_prehosp, pupil_ed, pupil_dhr, 
+         abnormal_CT, time_to_arrival_hrs, trauma_to_ct_hrs,  DHPBLAT, 
+         DHPASYM, DHMECHV, DHSBPL, OCOND)
+
+bidir <- MASS::stepAIC(glm(OCOND ~ ., data = na.omit(sub_temp), family = "binomial"), scope = . ~ .^2, direction = "both")
+```
+
+```{r eval=FALSE, eval=FALSE}
+#Survival
+
+surv_temp <- Surv(time = abs(as.numeric((difftime(as.POSIXct(pt_hosp_ct$followup_date, format = "%Y-%m-%d"), pt_hosp_ct$trauma_time, units = "days")))), event = as.integer(pt_hosp_ct$OCOND), type = "right")
+
+plot(survfit(surv_temp ~ inj_mech, data = pt_hosp_ct))
+
+survminer::ggsurvplot(fit = survfit(surv_temp ~ EDFLUID, data = pt_hosp_ct), data = pt_hosp_ct)
+```
+
+```{r eval=FALSE, include=FALSE}
+#ADMODE, PSEATB, PETHNIC - all have zero counts in at least one cell
+
+data_merged_sub <- pt_hosp_ct %>%
+  dplyr::select(-c(PID, PDOT, PHELMET, arrival_time, arrival_date, ADMODE, PSEATB, PETHNIC, AGCSEYES:ACGSMOT1, ACGSEYES1:ACGSMOT1, followup_date, trauma_severity_prehosp, trauma_severity_ED, trauma_time, EDAAMAA, EDFLUID)) 
+
+
+model_temp <- MASS::stepAIC(glm(OCOND ~ ., data = na.omit(data_merged_sub %>% dplyr::select(-c(ADTYPE, APBILAT, APASYM, EDSAO2, OCGTOT, CTPL, arrival_to_ct_hrs , GCS_change, ALRSBP, EDPAA))), family = "binomial"), direction = "both")
+
+tbi_lasso <- glmnetUtils::glmnet(OCOND ~ ., data = pt_hosp_ct %>% dplyr::select(-c(EDAAMAA, PID, PDOB, PDOT, PHELMET, arrival_time, arrival_date, ADMODE, PSEATB, PETHNIC, AGCSEYES:AGCSTOT, ACGSEYES1:ACGSTOT1, followup_date, PWEIGHTS, trauma_time, trauma_severity_prehosp, trauma_severity_ED)), family = "binomial", alpha = 1, lambda = 0.5)
+
+coef(tbi_lasso)
+
+
+coef(glmnetUtils::glmnet(formula = formula(outcome ~ time_to_arrival_hrs +  age_at_arrival_cat +
+                                             as.ordered(gcs_motor_ed) + bilat_ed + asymm_ed +
+                                             hypoxia_ed + midline_shift_cats + hypotension_ed * 
+                                             ed_airway_cat + ct_yn + mech_vent_yn + basal_cist + 
+                                             surgery_yn), data = tbi_clean, family = "binomial", 
+                         alpha = 1, lambda = 0.05)) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>%
+  rownames_to_column %>% 
+  filter(s0 != 0) %>% 
+  mutate(s0 = exp(s0))
+```
+
+
+
+```{r}
+glmnetUtils::cva.glmnet(outcome ~ ., data = tbi_clean, family = "binomial",
+                        nfolds = 5) -> test
+
+
+
+glmnetUtils::minlossplot(test)
+
+cv_alpha <- test$alpha[which.min((sapply(test$modlist, function(x)
+  { 
+  min(x$cvm)
+  })))]
+
+
+tbi_temp <- tbi_clean %>%
+  select(-c(race, weight, inj_mech, bilat_prehosp, asymm_prehosp, gcs_total_prehosp, sao2_prehosp,
+         sbp_prehosp, hypoxia_prehosp, hypotension_prehosp, pupil_prehosp, pupil_prehosp2, 
+         fluid_prehosp, prehosp_airway_cat, gcs_total_ed, age_at_arrival_cat, ed_gcs_tot_cat)) %>%
+  mutate(age_at_arrival_yrs = factor(I(age_at_arrival_yrs < 60)), 
+         time_to_arrival_hrs = factor(I(time_to_arrival_hrs < 8)))
+
+cv_lambda_1se <- glmnetUtils::cv.glmnet(outcome ~. , data = tbi_temp, family = "binomial", 
+                         alpha = 0.25, nfolds = 5)$lambda.1se
+
+
+
+coef(glmnetUtils::glmnet(outcome ~ ., data = tbi_temp, family = "binomial", 
+                         alpha = 0.25, lambda = cv_lambda_1se)) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>%
+  rownames_to_column %>% 
+  filter(s0 != 0) %>% 
+  mutate(s0 = exp(s0))
+
+
+
+set.seed(455)
+
+
+validation_folds <- sample(1:nrow(tbi_noprehosp), nrow(tbi_noprehosp) * 0.6)
+tbi_test_set <- tbi_noprehosp[-validation_folds, ] %>% 
+                          select(-c(gcs_total_ed))
+
+tbi_train_set <- tbi_noprehosp[validation_folds, ] %>% 
+                          select(-c(gcs_total_ed))
+
+
+glmnetUtils::cva.glmnet(outcome ~ ., data = tbi_train_set, family = "binomial",
+                        nfolds = 5) -> test
+
+cv_alpha <- test$alpha[which.min((sapply(test$modlist, function(x)
+  { 
+  min(x$cvm)
+  })))]
+
+
+
+
+cv_lambda_1se <- glmnetUtils::cv.glmnet(outcome ~. , data = tbi_train_set, family = "binomial", 
+                         alpha = 1, nfolds = 5)$lambda.1se
+
+glmn_TBI <- glmnetUtils::glmnet(outcome ~ ., data = tbi_train_set, family = "binomial", 
+                         alpha = 1, lambda = cv_lambda_1se)
+
+glmn_preds <- predict(glmn_TBI, newdata = tbi_test_set, type = "response") 
+glmn_preds <- (case_when(glmn_preds >= 0.5 ~ 1, TRUE ~ 0)) %>% 
+  as.data.frame() 
+
+mean(glmn_preds$. != case_when(tbi_test_set$outcome == "Dead" ~ 1, TRUE ~ 0))
+
+coef(glmnetUtils::glmnet(outcome ~ ., data = tbi_train_set, family = "binomial", 
+                         alpha = 0.025, lambda = cv_lambda_1se)) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>%
+  rownames_to_column %>% 
+  filter(s0 != 0) %>% 
+  mutate(s0 = exp(s0))
+
+
+
+#added 8/8/19 - logistic regression stuff from presentation
+
+
+
+#MASS::stepAIC(glm(outcome ~., data = select(tbi_noprehosp, -c(sex, race, inj_mech, ct_yn)) %>%
+#                    na.omit(.), family = 'binomial', na.action = na.omit), direction = "both")
+
+final_elnet <- glmnetUtils::cv.glmnet(outcome ~ . , data = tbi_noprehosp[train_index,], 
+                                       family = 'binomial', nfolds = 5, alpha = 0.10)
+
+final_logit <- glm(outcome ~ bilat_ed + asymm_ed + gcs_motor_ed + surgery_yn + basal_cist + 
+                   abnormal_CT + age_at_arrival_yrs + ed_airway_cat + midline_shift_cats, 
+                 data = tbi_noprehosp[train_index,] , family = "binomial")
+
+
+
+#ROC for final logistic regression model
+
+
+logit_preds <- predict(final_logit, newdata = tbi_test, type = "response")
+logit_ROC <- roc(response = tbi_test$outcome, predictor = logit_preds, levels = c("Alive", "Dead"),
+                 direction = ">", smooth = F, auc = T)
+
+confusionMatrix(factor(case_when(logit_preds >= 0.5 ~ "Alive", 
+                                 logit_preds < 0.5 ~ "Dead", 
+                                 TRUE ~ NA_character_)), tbi_test$outcome, positive = "Dead")
+
+
+
+
+##ggplot(data = logit_prec_rec)+
+#  geom_line(aes(x = recall, y = precision)) +
+#  geom_line(data = rf_prec_rec, aes(x = recall, y = precision))+
+#  ylim(c(0,1)) + 
+#  xlim(c(0, 1))
+
+```
+```{r}
+rpart_trees <- lapply(models, rpart_fun, data = tbi_clean, nfolds = 5, use_1se = F)
+
+rpart_stats <- round(do.call(rbind, lapply(rpart_trees, '[[', 2)), 3)
+
+rpart.plot(rpart_trees[[1]][[1]], box.palette="BuRd", shadow.col="gray", tweak = 1.5, type = 3,
+           clip.right.labs = FALSE)
+
+
+tbi_finaldf <- tbi_clean %>%
+  mutate(gcs_motor_ed = as.ordered(gcs_motor_ed)) %>%
+  rename("GCS Motor Score" = gcs_motor_ed, "CT Scan" = ct_yn, "Surgery" = surgery_yn, 
+         "Pupil Size Asymmetry" = asymm_ed, "Basal Cistern Status" = basal_cist,
+         "Midline Shift" = midline_shift_cats)
+formula_test <- formula(outcome ~ factor(I(time_to_arrival_hrs <= 8)) + 
+                          factor(I(age_at_arrival_yrs < 60)) + hypoxia_ed + hypotension_ed +
+                          as.ordered(gcs_motor_ed) + bilat_ed + asymm_ed +  
+                          ed_airway_cat + ct_yn + mech_vent_yn + basal_cist +
+                          midline_shift_cats + surgery_yn + fluid_ed)
+
+formula_noCT <- update(formula_test, .~. -basal_cist) %>%
+  update(., .~. - midline_shift_cats) 
+
+
+final_model <- formula(outcome ~ factor(I(time_to_arrival_hrs <= 8)) + 
+                         factor(I(age_at_arrival_yrs < 60)) + hypoxia_ed + hypotension_ed +
+                         `GCS Motor Score` + `Pupil Size Asymmetry` + bilat_ed + ed_airway_cat + 
+                         `CT Scan` + mech_vent_yn + `Basal Cistern Status` + `Midline Shift` + 
+                         Surgery + fluid_ed)
+set.seed(42)
+final_tree <- rpart_fun(data = mutate(tbi_noprehosp, gcs_motor_ed = as.ordered(gcs_motor_ed)), 
+                        formula_in = formula(outcome ~.), nfolds = 5, use_1se = T, minsplit = 15)
+set.seed(42)
+final_tree_sim <- rpart_fun(data = mutate(tbi_noprehosp, gcs_motor_ed = as.ordered(gcs_motor_ed)),                         formula_in = formula(outcome ~.), nfolds = 5, use_1se = T, minsplit = 12, 
+                            maxdepth = 4)
+set.seed(42)
+final_tree_noCT <- rpart_fun(data = tbi_noprehosp %>% 
+                               mutate(gcs_motor_ed = as.ordered(gcs_motor_ed)) %>%
+                               dplyr::select(-c(basal_cist, midline_shift_cats, surgery_yn)), 
+                             formula_in = formula(outcome ~.), nfolds = 5, use_1se = F, 
+                             minsplit = 12, maxdepth = 4)
+set.seed(42)
+tree_balanced <- rpart_fun(data = mutate(tbi_noprehosp, gcs_motor_ed = as.ordered(gcs_motor_ed),
+                        age_at_arrival_yrs = I(age_at_arrival_yrs <= 30), 
+                        time_to_arrival_hrs = I(time_to_arrival_hrs <= 8)) %>% 
+                          select(-c(sao2_ed, sbp_ed)), 
+          formula_in = formula(outcome ~.), nfolds = 5, use_1se = F, minsplit = 30, maxdepth = 5)
+
+#rpart_fun(data = tbi_clean, formula_in = formula_noCT, nfolds = 5, use_1se = F)
+
+```
+
+#Cross-validation
+
+```{r}
+set.seed(42)
+
+train_index <- sample(1:nrow(tbi_clean), nrow(tbi_clean) * 0.70)
+
+tbi_train <- tbi_clean[train_index,]
+tbi_test <- tbi_clean[-train_index,]
+
+
+tbi_train_tree <- tree(outcome ~  
+                         factor(I(age_at_arrival_yrs < 60)) + 
+                         factor(I(time_to_arrival_hrs < 8)) +
+                         as.ordered(gcs_motor_ed) + bilat_ed + asymm_ed + hypoxia_ed + 
+                         hypotension_ed + ed_airway_cat +
+                         ct_yn + abnormal_CT + midline_shift_cats + basal_cist + 
+                         surgery_yn + mech_vent_yn, 
+                       data = tbi_train, split = "deviance", 
+                       control = tree.control(nobs = nrow(tbi_train), minsize = 5), 
+                       na.action = na.pass)
+
+plot(tbi_train_tree)
+text(tbi_train_tree, pretty = 0, digits = 3)
+
+train_tree_cv <- cv.tree(tbi_train_tree, FUN = prune.misclass, K = 5)
+
+
+train_tree_pruned <- prune.misclass(tbi_train_tree, 
+                                    best = train_tree_cv$size[which.min(train_tree_cv$dev)])
+#best is testing out use of 1-standard-error rule 
+#train_tree_pruned <- prune.misclass(tbi_train_tree, 
+#                                    best = train_tree_cv$size[which.max(train_tree_cv$dev <=
+#                                                               (min(train_tree_cv$dev) + 
+#                                                                  sd(train_tree_cv$dev)))])
+
+summary(train_tree_pruned)
+tree_preds <- predict(train_tree_pruned, newdata = tbi_test, type = "class")
+caret::confusionMatrix(tree_preds, tbi_test$outcome)
+
+plot(train_tree_pruned)
+text(train_tree_pruned, pretty = 0, digits = 3)
+
+#test_tree$call$formula
+```
+
+
+
+# Multiple Imputation
+
+```{r}
+#Visualizing missingess in data
+#Amelia::missmap(pt_hosp_ct %>% select(-c(DHCRAN, DHSHE, DHEH, DHPHE, DHBPR, hematoma_evac_any)))
+Amelia::missmap(tbi_clean)
+
+#Little's test - not running on date / character variables, DHR data - p -> 0, data is MAR
+
+tbi_subset <- tbi_clean %>% 
+  mutate_if(is.factor, fct_explicit_na) %>% #EDFLUID does not have valid matri - excluding
+  select(-c(ct_yn))
+
+tbi_clean %>%
+  BaylorEdPsych::LittleMCAR(.) -> little_test
+
+#imputation using amelia
+
+tbi_imputed <- Amelia::amelia(x = tbi_subset, m = 10, noms = tbi_subset %>% 
+                   select_if(is.factor) %>% 
+                   colnames %>% 
+                   c(.), empri = 0.005 * nrow(tbi_subset)) #using a ridge prior with empri as       suggested in the amelia documentation for cases with high missingness and multicollinearity
+#https://cran.r-project.org/web/packages/Amelia/vignettes/amelia.pdf
+#According to documentation, will reduce variance but increase bias - acceptable as tree-based methods tend to have problems with variance rather than bias in the first place ..
+
+```
+
+
+
+# Random Forests with Multiple Imputation
+
+```{r eval=FALSE, include=FALSE}
+set.seed(42)
+tbi_imp_rfs <- lapply(tbi_imputed$imputations, function(x)
+  {
+  #set.seed(42)
+  train_index <- sample(1:nrow(x), nrow(x)* 0.75)
+  tbi_imp_train <- x[train_index, ]
+  tbi_imp_test <- x[-train_index, ]
+  
+  rf <- randomForest(formula = rf_formula, data = tbi_imp_train, importance = TRUE)
+  rf_pred <- predict(rf, newdata = tbi_imp_test)
+  misclassification <- (mean(tbi_imp_test$outcome != rf_pred))
+  return(misclassification)
+  })
+```
+
